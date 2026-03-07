@@ -225,7 +225,7 @@ Assignment 1 要求从零实现一个可训练的 Transformer Language Model，�
 
 | 模块 | 状态 | 备注 |
 |---|---|---|
-| BPE 训练 | ⬜ |  |
+| BPE 训练 | 🟡 |  |
 | Tokenizer encode/decode | ⬜ |  |
 | Linear / Embedding | ⬜ |  |
 | RMSNorm / SiLU / SwiGLU | ⬜ |  |
