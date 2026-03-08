@@ -20,3 +20,10 @@ def train_bpe(
         for i in range(len(tokens) -1):
             pair = (tokens[i],tokens[i+1]) # 字符对
             pair_counts[pair] += 1 # 统计字符对出现的次数
+    
+    
+    
+    
+    vocab: dict[int, bytes] = {}
+    merges: list[tuple[bytes, bytes]] = []
+    return vocab, merges
