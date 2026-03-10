@@ -224,7 +224,7 @@ assignment1-basics-main/
 | 模块 | 状态 | 备注 |
 |---|---|---|
 | BPE 训练 | ✅ | `tests/test_train_bpe.py` 已通过 |
-| Tokenizer encode/decode | ⬜ |  |
+| Tokenizer encode/decode | ✅ | `tests/test_tokenizer.py` 已通过  |
 | Linear / Embedding | ⬜ |  |
 | RMSNorm / SiLU / SwiGLU | ⬜ |  |
 | Softmax / Cross-Entropy | ⬜ |  |
