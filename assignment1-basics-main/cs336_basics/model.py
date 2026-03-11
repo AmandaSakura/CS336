@@ -22,11 +22,11 @@ def embedding(weights: Tensor, token_ids: Tensor) -> Tensor:
     """
     中文提示：
     - `weights` 形状是 `(vocab_size, d_model)`。
-    - `token_ids` 是整型张量，形状可以是 `(...)`，测试里常见的是 `(batch, seq_len)`。
+    - `token_ids` 是整型张量，形状可以是 `(...)`，测试里常见的是 `(batch_size, seq_len)`。
     - 输出应该在输入形状后面补一个 `d_model`，即 `(..., d_model)`。
     - 本质是按 token id 对 embedding 矩阵做查表。
     """
-    raise NotImplementedError
+    return weights[token_ids]
 
 
 def silu(in_features: Tensor) -> Tensor:
@@ -57,7 +57,7 @@ def rmsnorm(in_features: Tensor, weights: Tensor, eps: float = 1e-5) -> Tensor:
     in_temp = in_features.to(torch.float32)
     rms = torch.sqrt(in_temp.pow(2).mean(dim = -1, keepdim=True) + eps) 
     # -1表示的是沿着张量的最后一个维度求mean。keepdim是指要保持原来的维度，防止计算均值后维度坍塌。
-    y = in_temp / rms * weights
+    y = in_temp / rms * weights.to(torch.float32)
     return y.to(in_features.dtype)
 
 
