@@ -83,7 +83,9 @@ def build_causal_mask(sequence_length: int, device: torch.device | str) -> Tenso
     - `mask[i, j] = False` 表示位置 `i` 不能看到位置 `j`。
     - 因果约束要求只能看见自己和过去，因此应是“下三角为 True，上三角为 False”。
     """
-    raise NotImplementedError
+    return torch.tril(
+        torch.ones(sequence_length,sequence_length,dtype=torch.bool,device=device)
+    )
 
 
 def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Tensor | None = None) -> Tensor:
