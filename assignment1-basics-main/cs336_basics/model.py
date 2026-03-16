@@ -99,8 +99,16 @@ def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Tensor |
     - 先算 attention logits，再除以 `sqrt(d_k)`，然后应用 mask、softmax，最后乘 `V`。
     - 注意 PDF 里的约定：`mask=True` 表示“允许注意”，`mask=False` 表示“禁止注意”。
     """
-    raise NotImplementedError
+    d_k = Q.shape[-1]
+    att_logits = (Q @ K.transpose(-2,-1) / (d_k**0.5) )
+    if mask is not None:
+        att_logits = att_logits.masked_fill(~mask,float("-inf")) # ~是非的意思，意思是非 mask 的地方都负无穷
+    att_weights = torch.softmax(att_logits,dim=-1) # 最后一个维度做softmax
 
+    if mask is not None: # 避免一整行都 mask ，导致都是Nan，会出现数值问题，所以人工再置零
+        att_weights = att_weights.masked_fill(~mask,0.0)
+    
+    return att_weights @ V
 
 def split_heads(x: Tensor, num_heads: int) -> Tensor:
     """
@@ -110,7 +118,14 @@ def split_heads(x: Tensor, num_heads: int) -> Tensor:
     - 请把最后一维拆成 `(num_heads, head_dim)`，并整理成
       `(..., num_heads, seq_len, head_dim)` 的顺序，方便后续直接送进 attention。
     """
-    raise NotImplementedError
+    d_model = x.shape[-1]
+    assert d_model % num_heads == 0
+
+    head_dim = d_model // num_heads # this is h at (B S H D) -> (B H S D)
+    x = x.reshape(*x.shape[:-1],num_heads,head_dim) # *x.shape:保留除了最后一个维度之外的所有维度
+    #然后因为是reshape，所以num_heads和 head_dim直接加到 x 里了。
+    x = x.transpose(-3,-2) # then (B S H D) -> (B H S D)
+    return x # 拆分结束
 
 
 def merge_heads(x: Tensor) -> Tensor:
@@ -121,7 +136,12 @@ def merge_heads(x: Tensor) -> Tensor:
       `(..., seq_len, num_heads * head_dim)`。
     - 这个函数应与 `split_heads()` 的维度约定互为逆操作。
     """
-    raise NotImplementedError
+    num_heads = x.shape[-3]
+    head_dim = x.shape[-1]
+
+    x.transpose(-3,-2)
+    x.reshape(*x.shape[:-2],num_heads*head_dim)
+    return x
 
 
 def apply_rope(
@@ -138,8 +158,17 @@ def apply_rope(
     - RoPE 只作用在 Q 和 K 上，不作用在 V 上。
     - 注意这里要支持任意数量的前导 batch-like 维度，而不只是 `(batch, seq_len, d_k)`。
     """
-    raise NotImplementedError
-
+    x = in_query_or_key
+    d_k = x.shape[-1]
+    assert d_k % 2 == 0 # 不是偶数的话难搞
+    half_dim = d_k // 2
+    position = token_positions.to(device=x.device,dtype=torch.float32)
+    #上面这个仔细看看，to表示的是转换张量，device=x.device是控制张量在哪个硬件上。后面的float是因为三角函数要浮点
+    while position.ndim < x.ndim -1:
+        # Number of Dimensions（维度数量），表示当前数据的维度
+        position = position.unsqueeze(-2) # 不压缩，un-squeeze，也就是升维
+        # unsqueeze(-2) 的意思就是：在当前所有维度的倒数第二个位置，插进一个长度为 1 的新维度。
+        # 目的是把位置矩阵的维度和 x 的维度保持一致
 
 def multihead_self_attention(
     in_features: Tensor,
