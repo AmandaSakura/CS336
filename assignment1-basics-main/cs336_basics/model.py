@@ -139,8 +139,8 @@ def merge_heads(x: Tensor) -> Tensor:
     num_heads = x.shape[-3]
     head_dim = x.shape[-1]
 
-    x.transpose(-3,-2)
-    x.reshape(*x.shape[:-2],num_heads*head_dim)
+    x = x.transpose(-3,-2).contiguous()
+    x = x.reshape(*x.shape[:-2],num_heads*head_dim)
     return x
 
 
@@ -150,21 +150,24 @@ def apply_rope(
     theta: float,
     max_seq_len: int,
 ) -> Tensor:
-    x = in_query_or_key
-    d_k = x.shape[-1]
+    x = in_query_or_key # 方便用，取个别名
+    d_k = x.shape[-1] # 维度是最后一维
 
     if d_k % 2 != 0:
-        raise ValueError(f"d_k must be even, got {d_k}")
+        raise ValueError(f"d_k must be even, got {d_k}") # 不是偶数就报错
 
     if token_positions.shape[-1] != x.shape[-2]:
+        # x = in_query_or_key 的形状约定是 (..., seq_len, d_k)，token_positions 的形状约定是 (..., seq_len)，
+        # 判断token和位置编号是否匹配，不匹配就报错
         raise ValueError(
             f"token_positions last dimension must match seq_len: "
             f"{token_positions.shape[-1]} vs {x.shape[-2]}"
         )
 
     if token_positions.numel() > 0:
-        min_pos = int(token_positions.min().item())
-        max_pos = int(token_positions.max().item())
+        # numel() 是元素个数
+        min_pos = int(token_positions.min().item()) #找出所有位置编号中的最小值。.item() 把 0-d tensor 变成 Python 标量，再 int() 转成整数。
+        max_pos = int(token_positions.max().item()) #找出所有位置编号中的最大值。
         if min_pos < 0 or max_pos >= max_seq_len:
             raise ValueError(
                 f"token positions must be in [0, {max_seq_len - 1}], "
@@ -178,38 +181,41 @@ def apply_rope(
         else x.dtype
     )
 
+    # 其实上面很多都是稳健检查，下面开始是真家伙了
     half_dim = d_k // 2
 
-    positions = token_positions.to(device=x.device, dtype=compute_dtype)
+    positions = token_positions.to(device=x.device, dtype=compute_dtype) # 让位置张量到设备中
     while positions.ndim < x.ndim - 1:
-        positions = positions.unsqueeze(-2)
-    positions = positions.unsqueeze(-1)
+        # 如果位置的维度数比输入的维度数-1要小，为什么要-1，是因为x会多一个d_k维度，这里单纯是要对齐seq_len，能在 heads 维广播
+        positions = positions.unsqueeze(-2) # 循环在位置的维度的倒数第二个位置加一个维度，直到上述对齐
+    positions = positions.unsqueeze(-1) # 最后留一个维度，用来乘 (half_dim,)，通过广播变成 (..., seq_len, half_dim)
 
-    i = torch.arange(half_dim, device=x.device, dtype=compute_dtype)
-    inv_freq = theta ** (-2.0 * i / d_k)
-    angles = positions * inv_freq
+    i = torch.arange(half_dim, device=x.device, dtype=compute_dtype) # 生成一个长度为half_dim的张量,范围是(0,half_dim-1)
+    inv_freq = theta ** (-2.0 * i / d_k) # 频率是给定基数的(-2i/d_k)次方
+    angles = positions * inv_freq # 位置乘频率，得到旋转角度
 
     cos_angles = torch.cos(angles)
     sin_angles = torch.sin(angles)
 
-    x_even = x[..., 0::2].to(dtype=compute_dtype)
-    x_odd = x[..., 1::2].to(dtype=compute_dtype)
+    x_even = x[..., 0::2].to(dtype=compute_dtype)# 0::2：从索引 0 开始，每隔 2 个取一个
+    x_odd = x[..., 1::2].to(dtype=compute_dtype)# 1::2：从索引 1 开始，每隔 2 个取一个，总之就是奇偶拆开
 
-    out_even = x_even * cos_angles - x_odd * sin_angles
-    out_odd = x_even * sin_angles + x_odd * cos_angles
+    out_even = x_even * cos_angles - x_odd * sin_angles # cos,-sin
+    out_odd = x_even * sin_angles + x_odd * cos_angles # sin,cos
 
     out = torch.stack((out_even, out_odd), dim=-1).flatten(-2)
     return out.to(dtype=x.dtype)
 
-
+from jaxtyping import Bool, Float, Int
 def multihead_self_attention(
-    in_features: Tensor,
-    q_proj_weight: Tensor,
-    k_proj_weight: Tensor,
-    v_proj_weight: Tensor,
-    o_proj_weight: Tensor,
+    d_model: int,
     num_heads: int,
-) -> Tensor:
+    q_proj_weight: Float[Tensor, " d_k d_in"],
+    k_proj_weight: Float[Tensor, " d_k d_in"],
+    v_proj_weight: Float[Tensor, " d_v d_in"],
+    o_proj_weight: Float[Tensor, " d_model d_v"],
+    in_features: Float[Tensor, " ... sequence_length d_in"],
+) -> Float[Tensor, " ... sequence_length d_out"]:
     """
     中文提示：
     - `in_features` 形状是 `(..., seq_len, d_model)`。
@@ -220,8 +226,24 @@ def multihead_self_attention(
       接着 merge heads，最后过输出投影。
     - 返回形状应与输入相同，即 `(..., seq_len, d_model)`。
     """
-    raise NotImplementedError
+    seq_len = in_features.shape[-2]
+    d_model = in_features.shaple[-1]
+    if d_model % num_heads != 0:
+        raise ValueError("baga")
+    
+    Q = linear(q_proj_weight,in_features)
+    Q = split_heads(Q,num_heads)
+    K = linear(k_proj_weight,in_features)
+    K = split_heads(K,num_heads)
+    V = linear(v_proj_weight,in_features)
+    V = split_heads(V,num_heads)
 
+    mask = build_causal_mask(seq_len)
+
+    attn_out = scaled_dot_product_attention(Q,K,V,mask=mask)
+    attn_out = merge_heads(attn_out)
+    out = linear(o_proj_weight,attn_out) # 最后用Wo重投影
+    return out
 
 def multihead_self_attention_with_rope(
     in_features: Tensor,
