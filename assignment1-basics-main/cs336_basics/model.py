@@ -150,25 +150,57 @@ def apply_rope(
     theta: float,
     max_seq_len: int,
 ) -> Tensor:
-    """
-    中文提示：
-    - 输入 `in_query_or_key` 的形状是 `(..., seq_len, d_k)`。
-    - `token_positions` 的形状是 `(..., seq_len)`，要和输入的前导 batch-like 维度对齐。
-    - 输出形状与输入完全相同。
-    - RoPE 只作用在 Q 和 K 上，不作用在 V 上。
-    - 注意这里要支持任意数量的前导 batch-like 维度，而不只是 `(batch, seq_len, d_k)`。
-    """
     x = in_query_or_key
     d_k = x.shape[-1]
-    assert d_k % 2 == 0 # 不是偶数的话难搞
+
+    if d_k % 2 != 0:
+        raise ValueError(f"d_k must be even, got {d_k}")
+
+    if token_positions.shape[-1] != x.shape[-2]:
+        raise ValueError(
+            f"token_positions last dimension must match seq_len: "
+            f"{token_positions.shape[-1]} vs {x.shape[-2]}"
+        )
+
+    if token_positions.numel() > 0:
+        min_pos = int(token_positions.min().item())
+        max_pos = int(token_positions.max().item())
+        if min_pos < 0 or max_pos >= max_seq_len:
+            raise ValueError(
+                f"token positions must be in [0, {max_seq_len - 1}], "
+                f"got min={min_pos}, max={max_pos}"
+            )
+
+    # 半精度下三角函数通常先升到 float32 更稳，最后再转回原 dtype
+    compute_dtype = (
+        torch.float32
+        if x.dtype in (torch.float16, torch.bfloat16)
+        else x.dtype
+    )
+
     half_dim = d_k // 2
-    position = token_positions.to(device=x.device,dtype=torch.float32)
-    #上面这个仔细看看，to表示的是转换张量，device=x.device是控制张量在哪个硬件上。后面的float是因为三角函数要浮点
-    while position.ndim < x.ndim -1:
-        # Number of Dimensions（维度数量），表示当前数据的维度
-        position = position.unsqueeze(-2) # 不压缩，un-squeeze，也就是升维
-        # unsqueeze(-2) 的意思就是：在当前所有维度的倒数第二个位置，插进一个长度为 1 的新维度。
-        # 目的是把位置矩阵的维度和 x 的维度保持一致
+
+    positions = token_positions.to(device=x.device, dtype=compute_dtype)
+    while positions.ndim < x.ndim - 1:
+        positions = positions.unsqueeze(-2)
+    positions = positions.unsqueeze(-1)
+
+    i = torch.arange(half_dim, device=x.device, dtype=compute_dtype)
+    inv_freq = theta ** (-2.0 * i / d_k)
+    angles = positions * inv_freq
+
+    cos_angles = torch.cos(angles)
+    sin_angles = torch.sin(angles)
+
+    x_even = x[..., 0::2].to(dtype=compute_dtype)
+    x_odd = x[..., 1::2].to(dtype=compute_dtype)
+
+    out_even = x_even * cos_angles - x_odd * sin_angles
+    out_odd = x_even * sin_angles + x_odd * cos_angles
+
+    out = torch.stack((out_even, out_odd), dim=-1).flatten(-2)
+    return out.to(dtype=x.dtype)
+
 
 def multihead_self_attention(
     in_features: Tensor,
