@@ -178,8 +178,7 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    #return multihead_self_attention(d_model,num_heads,q_proj_weight,k_proj_weight,v_proj_weight,o_proj_weight,in_features)
-    raise NotImplementedError
+    return multihead_self_attention_with_rope(in_features,q_proj_weight,k_proj_weight,v_proj_weight,o_proj_weight,num_heads,theta,max_seq_len,token_positions)
 
 def run_rope(
     d_k: int,
@@ -273,7 +272,21 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    return transformer_block(
+        in_features,
+        ln1_weight=weights["ln1.weight"],
+        q_proj_weight=weights["attn.q_proj.weight"],
+        k_proj_weight=weights["attn.k_proj.weight"],
+        v_proj_weight=weights["attn.v_proj.weight"],
+        o_proj_weight=weights["attn.output_proj.weight"],
+        ln2_weight=weights["ln2.weight"],
+        w1_weight=weights["ffn.w1.weight"],
+        w2_weight=weights["ffn.w2.weight"],
+        w3_weight=weights["ffn.w3.weight"],
+        num_heads=num_heads,
+        theta=theta,
+        max_seq_len=max_seq_len,
+    )
 
 
 def run_transformer_lm(
@@ -355,7 +368,31 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    block_weights = []
+    for layer_idx in range(num_layers):
+        block_weights.append(
+            {
+                "ln1_weight": weights[f"layers.{layer_idx}.ln1.weight"],
+                "q_proj_weight": weights[f"layers.{layer_idx}.attn.q_proj.weight"],
+                "k_proj_weight": weights[f"layers.{layer_idx}.attn.k_proj.weight"],
+                "v_proj_weight": weights[f"layers.{layer_idx}.attn.v_proj.weight"],
+                "o_proj_weight": weights[f"layers.{layer_idx}.attn.output_proj.weight"],
+                "ln2_weight": weights[f"layers.{layer_idx}.ln2.weight"],
+                "w1_weight": weights[f"layers.{layer_idx}.ffn.w1.weight"],
+                "w2_weight": weights[f"layers.{layer_idx}.ffn.w2.weight"],
+                "w3_weight": weights[f"layers.{layer_idx}.ffn.w3.weight"],
+            }
+        )
+    return transformer_lm(
+        in_indices,
+        token_embedding_weight=weights["token_embeddings.weight"],
+        block_weights=block_weights,
+        ln_final_weight=weights["ln_final.weight"],
+        lm_head_weight=weights["lm_head.weight"],
+        num_heads=num_heads,
+        theta=rope_theta,
+        max_seq_len=context_length,
+    )
 
 
 def run_rmsnorm(

@@ -263,7 +263,24 @@ def multihead_self_attention_with_rope(
     - 如果 `token_positions is None`，可以按当前序列长度构造 `0..seq_len-1`。
     - 输出形状仍然是 `(..., seq_len, d_model)`。
     """
-    raise NotImplementedError
+    seq_len = in_features.shape[-2]
+    d_model = in_features.shape[-1]
+    if d_model % num_heads != 0:
+        raise ValueError("d_model must be divisible by num_heads")
+    if token_positions is None:
+        token_positions = torch.arange(seq_len, device=in_features.device)
+    Q = linear(q_proj_weight, in_features)
+    K = linear(k_proj_weight, in_features)
+    V = linear(v_proj_weight, in_features)
+    Q = split_heads(Q, num_heads)
+    K = split_heads(K, num_heads)
+    V = split_heads(V, num_heads)
+    Q = apply_rope(Q, token_positions, theta, max_seq_len)# 区别在这里
+    K = apply_rope(K, token_positions, theta, max_seq_len)# 和这里
+    mask = build_causal_mask(seq_len, in_features.device)
+    attn_out = scaled_dot_product_attention(Q, K, V, mask=mask)
+    attn_out = merge_heads(attn_out)
+    return linear(o_proj_weight, attn_out)
 
 
 def transformer_block(
@@ -292,7 +309,22 @@ def transformer_block(
     - `w1_weight`、`w3_weight` 是 `(d_ff, d_model)`，`w2_weight` 是 `(d_model, d_ff)`。
     - 输出形状与输入相同，仍是 `(batch, seq_len, d_model)`。
     """
-    raise NotImplementedError
+    x = in_features
+    attn_input = rmsnorm(x,ln1_weight)
+    attn_output = multihead_self_attention_with_rope(attn_input,
+    q_proj_weight,
+    k_proj_weight,
+    v_proj_weight,
+    o_proj_weight,
+    num_heads,
+    theta,
+    max_seq_len=max_seq_len)
+    x = x+attn_output
+    ffn_input = rmsnorm(x,ln2_weight)
+    ffn_output = swiglu(ffn_input,w1_weight,w2_weight,w3_weight)
+    x = x+ffn_output
+    return x
+
 
 
 def transformer_lm(
@@ -317,7 +349,18 @@ def transformer_lm(
     - 前向顺序应是：token embedding -> 多层 transformer block -> final RMSNorm -> lm head。
     - 最终输出未归一化 logits，形状是 `(batch, seq_len, vocab_size)`。
     """
-    raise NotImplementedError
+    x = embedding(token_embedding_weight,in_indices)
+    for block in block_weights:
+        x = transformer_block(
+            x,
+            **block,
+            num_heads=num_heads,
+            theta=theta,
+            max_seq_len=max_seq_len
+        )
+    x = rmsnorm(x,ln_final_weight)
+    logits = linear(lm_head_weight,x)
+    return logits
 
 
 __all__ = [
