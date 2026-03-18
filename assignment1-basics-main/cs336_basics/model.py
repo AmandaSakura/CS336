@@ -238,7 +238,7 @@ def multihead_self_attention(
     V = linear(v_proj_weight,in_features)
     V = split_heads(V,num_heads)
 
-    mask = build_causal_mask(seq_len)
+    mask = build_causal_mask(seq_len, in_features.device)
 
     attn_out = scaled_dot_product_attention(Q,K,V,mask=mask)
     attn_out = merge_heads(attn_out)
