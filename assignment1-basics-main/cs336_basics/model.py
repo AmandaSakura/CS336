@@ -227,7 +227,7 @@ def multihead_self_attention(
     - 返回形状应与输入相同，即 `(..., seq_len, d_model)`。
     """
     seq_len = in_features.shape[-2]
-    d_model = in_features.shaple[-1]
+    d_model = in_features.shape[-1]
     if d_model % num_heads != 0:
         raise ValueError("baga")
     
