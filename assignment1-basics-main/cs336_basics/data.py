@@ -14,8 +14,12 @@ def get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device
     x = torch.stack(
         [torch.tensor(dataset[s : s + context_length], dtype=torch.long) for s in starts]
     )
-    # 同理
+    # 同理，但是y向右移动了一位，因为 y 是 x 的下一步预测。
     y = torch.stack(
         [torch.tensor(dataset[s + 1 : s + context_length + 1], dtype=torch.long) for s in starts]
     )
     return x.to(device), y.to(device)
+
+    # 总的来说
+    # get_batch() 的作用是从一维 token id 数据集中随机抽取多个长度为 context_length 的连续片段
+    # 构造成自回归 Transformer 训练所需的输入 x 和右移一位的目标 y
